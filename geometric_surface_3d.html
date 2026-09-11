@@ -1,0 +1,1401 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Geometric Surface 3D - เกมเรียงตึกเรขาคณิต</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Google Fonts: Inter & Prompt -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=Prompt:wght@400;600;700;800&display=swap" rel="stylesheet">
+    <!-- Matter.js Physics Engine -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
+    
+    <!-- MediaPipe Hands & Camera Utils for AR Gesture Control -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+
+    <style>
+        * {
+            user-select: none;
+            -webkit-user-select: none;
+            touch-action: manipulation;
+        }
+        body {
+            font-family: 'Prompt', 'Inter', sans-serif;
+            overflow: hidden;
+            background-color: #0f172a;
+            color: #f8fafc;
+        }
+        canvas {
+            display: block;
+            width: 100vw;
+            height: 100vh;
+        }
+        .glass-panel {
+            background: rgba(15, 23, 42, 0.75);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+        }
+        .pulse-glow {
+            animation: pulseGlow 2s infinite alternate;
+        }
+        @keyframes pulseGlow {
+            0% { box-shadow: 0 0 10px rgba(99, 102, 241, 0.4); }
+            100% { box-shadow: 0 0 25px rgba(99, 102, 241, 0.8); }
+        }
+        .milestone-banner {
+            animation: bannerPop 2.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+        }
+        @keyframes bannerPop {
+            0% { opacity: 0; transform: translate(-50%, -20px) scale(0.8); }
+            15% { opacity: 1; transform: translate(-50%, 0) scale(1.05); }
+            25% { transform: translate(-50%, 0) scale(1); }
+            85% { opacity: 1; transform: translate(-50%, 0) scale(1); }
+            100% { opacity: 0; transform: translate(-50%, -30px) scale(0.9); }
+        }
+    </style>
+</head>
+<body class="relative w-screen h-screen overflow-hidden select-none bg-slate-950">
+
+    <!-- Hidden Video Element for AR Video Stream -->
+    <video id="webcam-video" class="hidden" playsinline></video>
+
+    <!-- Canvas Container -->
+    <div id="canvas-container" class="absolute inset-0 z-0"></div>
+
+    <!-- Top HUD Bar -->
+    <div class="absolute top-3 left-3 right-3 z-10 flex items-start justify-between pointer-events-none">
+        
+        <!-- Left Column: Lives Container & Stats (Height/Best) Positioned Below It -->
+        <div class="flex flex-col items-start gap-2 pointer-events-auto">
+            <!-- Lives Panel (Heart Icons Only) -->
+            <div class="glass-panel px-3.5 py-2 rounded-2xl flex items-center gap-1.5 shadow-lg">
+                <div id="lives-container" class="flex flex-wrap items-center gap-1 text-red-500 text-xs sm:text-sm"></div>
+            </div>
+
+            <!-- Height & Best Stats (Positioned Below Lives) -->
+            <div class="glass-panel px-4 py-2 rounded-2xl flex items-center gap-4 shadow-lg">
+                <div class="flex flex-col items-center">
+                    <span class="text-[9px] sm:text-[10px] text-indigo-400 font-bold uppercase tracking-widest">ความสูงปัจจุบัน</span>
+                    <div class="flex items-baseline gap-0.5">
+                        <span id="height-val" class="text-xl sm:text-2xl font-extrabold text-white">0.0</span>
+                        <span class="text-xs text-indigo-300 font-bold">m</span>
+                    </div>
+                </div>
+                <div class="w-px h-7 bg-slate-700/60"></div>
+                <div class="flex flex-col items-center">
+                    <span class="text-[9px] sm:text-[10px] text-amber-400 font-bold uppercase tracking-widest">สถิติสูงสุด</span>
+                    <div class="flex items-baseline gap-0.5">
+                        <span id="best-height-val" class="text-xl sm:text-2xl font-extrabold text-amber-300">0.0</span>
+                        <span class="text-xs text-amber-400/80 font-bold">m</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Action Controls (Top Right) -->
+        <div class="flex items-center gap-2 pointer-events-auto">
+            <button id="mode-btn" onclick="toggleGameMode()" class="glass-panel px-3.5 h-10 rounded-2xl flex items-center gap-2 text-indigo-300 hover:text-white hover:bg-indigo-900/40 transition-all shadow-lg active:scale-95 font-semibold text-xs border border-indigo-500/40">
+                <i class="fa-solid fa-users text-indigo-400" id="mode-icon"></i>
+                <span id="mode-text">โหมดแข่ง 2 คน</span>
+            </button>
+            <button id="ar-btn" onclick="toggleARMode()" class="glass-panel px-3.5 h-10 rounded-2xl flex items-center gap-2 text-indigo-300 hover:text-white hover:bg-indigo-900/40 transition-all shadow-lg active:scale-95 font-semibold text-xs border border-indigo-500/40">
+                <i class="fa-solid fa-camera text-indigo-400" id="ar-icon"></i>
+                <span id="ar-text" class="hidden sm:inline">โหมด AR มือ</span>
+            </button>
+            <button id="sound-btn" onclick="toggleSound()" class="glass-panel w-10 h-10 rounded-2xl flex items-center justify-center text-slate-300 hover:text-white hover:bg-slate-800/80 transition-all shadow-lg active:scale-95">
+                <i id="sound-icon" class="fa-solid fa-volume-high"></i>
+            </button>
+            <button onclick="restartGame()" class="glass-panel px-3.5 h-10 rounded-2xl flex items-center gap-2 text-slate-200 hover:text-white hover:bg-slate-800/80 transition-all shadow-lg active:scale-95 font-semibold text-xs">
+                <i class="fa-solid fa-rotate-right text-indigo-400"></i>
+                <span class="hidden sm:inline">เริ่มใหม่</span>
+            </button>
+        </div>
+    </div>
+
+    <!-- 2-Player Status Bar -->
+    <div id="versus-hud-bar" class="hidden absolute top-24 left-3 right-3 z-10 flex items-center justify-between pointer-events-none">
+        <div class="glass-panel px-4 py-2 rounded-2xl border border-indigo-500/50 flex items-center gap-3 pointer-events-auto">
+            <span class="text-xs font-black text-indigo-400">P1:</span>
+            <div id="p1-lives" class="flex items-center gap-1 text-red-500 text-xs"></div>
+            <span id="p1-height-text" class="text-sm font-black text-white">0.0 m</span>
+        </div>
+
+        <div class="bg-amber-500/20 px-3.5 py-1 rounded-full border border-amber-500/40 text-amber-300 text-xs font-bold shadow">
+            ⚡ แข่งพิชิต 20.0 เมตร!
+        </div>
+
+        <div class="glass-panel px-4 py-2 rounded-2xl border border-rose-500/50 flex items-center gap-3 pointer-events-auto">
+            <span id="p2-height-text" class="text-sm font-black text-white">0.0 m</span>
+            <div id="p2-lives" class="flex items-center gap-1 text-red-500 text-xs"></div>
+            <span class="text-xs font-black text-rose-400">:P2</span>
+        </div>
+    </div>
+
+    <!-- AR Gesture Status Overlay -->
+    <div id="ar-status-hud" class="hidden absolute top-16 left-1/2 -translate-x-1/2 z-20 pointer-events-none glass-panel px-4 py-2 rounded-2xl border border-indigo-500/40 flex items-center gap-3 shadow-xl">
+        <div id="ar-gesture-badge" class="px-2.5 py-1 rounded-xl text-xs font-black bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 flex items-center gap-1.5">
+            <i class="fa-solid fa-hand"></i>
+            <span id="ar-gesture-text">แบมือ (เล็งตำแหน่ง)</span>
+        </div>
+        <span class="text-[11px] text-slate-300">หมุนมือ = หมุนชิ้นงาน | กำมือ = ปล่อยวาง</span>
+    </div>
+
+    <!-- Milestone Announcement Popups -->
+    <div id="milestone-container" class="absolute top-20 left-1/2 -translate-x-1/2 z-20 pointer-events-none"></div>
+
+    <!-- Creator Credit Text (Bottom Right) -->
+    <div class="absolute bottom-1 right-3 z-20 pointer-events-none text-[10px] sm:text-xs text-slate-300/90 font-medium tracking-wide drop-shadow-md bg-slate-900/70 px-2.5 py-1 rounded-xl border border-slate-700/50 backdrop-blur-md">
+        Created by ครูวรรษพงษ์ หมื่นแสน
+    </div>
+
+    <!-- Bottom Controls & Shape Queue Dashboard -->
+    <div class="absolute bottom-4 left-3 right-3 z-10 flex flex-col sm:flex-row items-center justify-between gap-3 pointer-events-none">
+        
+        <!-- Shape Queue Status -->
+        <div id="shape-selector" class="glass-panel px-4 py-2.5 rounded-2xl pointer-events-auto shadow-xl flex items-center justify-center"></div>
+
+        <!-- Material Surface & Friction Slider -->
+        <div class="glass-panel p-2 rounded-2xl pointer-events-auto shadow-xl flex flex-col sm:flex-row items-center gap-2.5">
+            <div class="flex items-center gap-2 px-2">
+                <i class="fa-solid fa-sliders text-indigo-400 text-xs"></i>
+                <span class="text-xs text-slate-300 font-bold whitespace-nowrap">แรงเสียดทาน:</span>
+                <input type="range" id="friction-range" min="0" max="100" value="80" oninput="updateFrictionFromSlider(this.value)" class="w-24 sm:w-28 accent-indigo-500 cursor-pointer h-1.5 bg-slate-700 rounded-lg appearance-none">
+                <span id="friction-val-text" class="text-xs font-extrabold text-indigo-400 w-10 text-right">80%</span>
+            </div>
+            
+            <div class="hidden sm:block w-px h-6 bg-slate-700/60"></div>
+
+            <!-- Material Buttons -->
+            <div class="flex items-center gap-1.5">
+                <button onclick="setMaterial('wood')" id="mat-wood" class="mat-btn px-2.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1 bg-amber-600/90 text-white shadow">
+                    <i class="fa-solid fa-tree"></i>
+                    <span>ไม้</span>
+                </button>
+                <button onclick="setMaterial('ice')" id="mat-ice" class="mat-btn px-2.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1 text-slate-400 hover:text-white">
+                    <i class="fa-solid fa-snowflake text-cyan-400"></i>
+                    <span>น้ำแข็ง</span>
+                </button>
+                <button onclick="setMaterial('rubber')" id="mat-rubber" class="mat-btn px-2.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1 text-slate-400 hover:text-white">
+                    <i class="fa-solid fa-cube text-emerald-400"></i>
+                    <span>ยาง</span>
+                </button>
+                <button onclick="setMaterial('steel')" id="mat-steel" class="mat-btn px-2.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1 text-slate-400 hover:text-white">
+                    <i class="fa-solid fa-shield-halved text-slate-300"></i>
+                    <span>เหล็ก</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- Balanced Rotation Control Panel -->
+        <div class="glass-panel p-2 rounded-2xl pointer-events-auto shadow-xl flex items-center gap-2 border border-indigo-500/30">
+            <button onclick="rotatePiece(-15)" title="หมุนซ้าย 15°" class="w-10 h-10 rounded-xl bg-slate-800/80 hover:bg-indigo-600/40 text-indigo-300 hover:text-white transition-all flex items-center justify-center active:scale-90 shadow">
+                <i class="fa-solid fa-rotate-left text-base"></i>
+            </button>
+            <span class="text-xs text-slate-300 font-bold px-1 whitespace-nowrap">หมุนวัตถุ</span>
+            <button onclick="rotatePiece(15)" title="หมุนขวา 15°" class="w-10 h-10 rounded-xl bg-slate-800/80 hover:bg-indigo-600/40 text-indigo-300 hover:text-white transition-all flex items-center justify-center active:scale-90 shadow">
+                <i class="fa-solid fa-rotate-right text-base"></i>
+            </button>
+        </div>
+    </div>
+
+    <!-- Game Over / Victory Modal Overlay -->
+    <div id="game-over-modal" class="hidden absolute inset-0 z-50 glass-panel bg-slate-950/85 flex items-center justify-center p-4">
+        <div class="bg-slate-900 border border-slate-700/80 rounded-3xl p-6 sm:p-8 max-w-md w-full text-center shadow-2xl relative overflow-hidden">
+            <div class="absolute -top-12 -right-12 w-32 h-32 bg-indigo-500/20 rounded-full blur-2xl"></div>
+            <div class="absolute -bottom-12 -left-12 w-32 h-32 bg-red-500/20 rounded-full blur-2xl"></div>
+
+            <div id="modal-icon-bg" class="w-16 h-16 rounded-2xl bg-red-500/20 border border-red-500/40 text-red-400 flex items-center justify-center text-3xl mx-auto mb-4 shadow-inner">
+                <i id="modal-icon" class="fa-solid fa-building-circle-xmark"></i>
+            </div>
+
+            <h2 id="modal-title" class="text-2xl sm:text-3xl font-extrabold text-white mb-1">ตึกถล่มพังทลาย!</h2>
+            <p id="modal-subtitle" class="text-xs text-slate-400 mb-6">ชิ้นส่วนหลุดออกจากพื้นที่วางมากเกินไป</p>
+
+            <div class="grid grid-cols-2 gap-3 bg-slate-800/60 p-4 rounded-2xl mb-6 border border-slate-700/50">
+                <div class="flex flex-col items-center">
+                    <span id="label-stat-1" class="text-[11px] text-slate-400 font-bold uppercase">ความสูงที่ทำได้</span>
+                    <span id="final-height" class="text-2xl font-black text-indigo-400">0.0 m</span>
+                </div>
+                <div class="flex flex-col items-center">
+                    <span id="label-stat-2" class="text-[11px] text-slate-400 font-bold uppercase">สถิติสูงสุด</span>
+                    <span id="final-best" class="text-2xl font-black text-amber-300">0.0 m</span>
+                </div>
+            </div>
+
+            <button onclick="restartGame()" class="w-full bg-gradient-to-r from-indigo-500 to-indigo-600 hover:from-indigo-600 hover:to-indigo-700 text-white font-bold py-3.5 rounded-2xl shadow-lg active:scale-95 transition-all text-sm flex items-center justify-center gap-2">
+                <i class="fa-solid fa-rotate-right"></i>
+                <span>เล่นใหม่อีกครั้ง</span>
+            </button>
+        </div>
+    </div>
+
+    <script>
+        const { Engine, Render, Runner, Bodies, Composite, Events } = Matter;
+
+        const CONFIG = {
+            BASE_WIDTH: 720,
+            BASE_HEIGHT: 40,
+            MAX_LIVES: 10,
+            SCALE_METERS_PER_PIXEL: 0.02,
+            VERSUS_TARGET_HEIGHT: 20.0
+        };
+
+        let currentGameMode = 'single';
+        let engine, world, render, runner;
+        let basePlatform, slopedRoofLeft, slopedRoofRight;
+        let basePlatformP1, slopedRoofLeftP1, slopedRoofRightP1;
+        let basePlatformP2, slopedRoofLeftP2, slopedRoofRightP2;
+        let placedBodies = [];
+        let particles = [];
+        let lives = CONFIG.MAX_LIVES;
+        let currentHeight = 0;
+        let bestHeight = parseFloat(localStorage.getItem('geo_stacker_best') || '0');
+        let soundEnabled = true;
+        let isGameOver = false;
+
+        // 2-Player Versus State
+        let p2PlacedBodies = [];
+        let p2Lives = CONFIG.MAX_LIVES;
+        let p2CurrentHeight = 0;
+        let p2SelectedShapeIndex = 0;
+        let p2NextShapeIndex = 1;
+        let p2Rotation = 0;
+        let p2PointerX = 0;
+        let p2PointerY = 0;
+
+        // AR Hand Tracking State
+        let isARActive = false;
+        let handsDetector = null;
+        let cameraInstance = null;
+        let videoElement = null;
+        let arHandState = 'open';
+        let lastARHandState = 'open';
+        let p2ArHandState = 'open';
+        let lastP2ArHandState = 'open';
+        let allHandLandmarks = [];
+
+        // Active Piece Placement State
+        let selectedShapeIndex = 0;
+        let nextShapeIndex = 1;
+        let currentRotation = 0;
+        let pointerX = window.innerWidth / 2;
+        let pointerY = window.innerHeight / 2;
+        let currentMaterial = { friction: 100.0, frictionStatic: 1000.0, frictionAir: 0.015, restitution: 0.005, density: 0.003 };
+
+        // Camera Tracking
+        let camera = {
+            x: window.innerWidth / 2,
+            y: window.innerHeight / 2,
+            zoom: 1
+        };
+
+        const SHAPES = [
+            { name: 'กล่องสี่เหลี่ยม', icon: 'fa-vector-square', color: '#6366f1', create: (x, y, angle, mat) => Bodies.rectangle(x, y, 65, 65, { angle, ...mat }) },
+            { name: 'คานยาวฐานกว้าง', icon: 'fa-grip-lines', color: '#38bdf8', create: (x, y, angle, mat) => Bodies.rectangle(x, y, 120, 32, { angle, ...mat }) },
+            { name: 'ลิ่มเอียงสไลด์', icon: 'fa-play', color: '#f59e0b', create: (x, y, angle, mat) => Bodies.trapezoid(x, y, 85, 55, 0.5, { angle, ...mat }) },
+            { name: 'สามเหลี่ยมยึดเกาะ', icon: 'fa-caret-up', color: '#ec4899', create: (x, y, angle, mat) => Bodies.polygon(x, y, 3, 42, { angle, ...mat }) },
+            { name: 'หกเหลี่ยมรังผึ้ง', icon: 'fa-cubes', color: '#10b981', create: (x, y, angle, mat) => Bodies.polygon(x, y, 6, 38, { angle, ...mat }) },
+            { name: 'ทรงกลมกลิ้งได้', icon: 'fa-circle', color: '#a855f7', create: (x, y, angle, mat) => Bodies.circle(x, y, 32, { angle, ...mat }) },
+            { name: 'เสาสูงรับน้ำหนัก', icon: 'fa-bars-staggered', color: '#f97316', create: (x, y, angle, mat) => Bodies.rectangle(x, y, 38, 95, { angle, ...mat }) },
+            { name: 'สะพานสโคป', icon: 'fa-layer-group', color: '#14b8a6', create: (x, y, angle, mat) => Bodies.trapezoid(x, y, 110, 36, 0.2, { angle, ...mat }) }
+        ];
+
+        const sfx = {
+            ctx: null,
+            init() {
+                if (!this.ctx) {
+                    const AudioContext = window.AudioContext || window.webkitAudioContext;
+                    if (AudioContext) this.ctx = new AudioContext();
+                }
+                if (this.ctx && this.ctx.state === 'suspended') this.ctx.resume();
+            },
+            playDrop() {
+                if (!soundEnabled || !this.ctx) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(420, this.ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(140, this.ctx.currentTime + 0.15);
+                gain.gain.setValueAtTime(0.3, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.15);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.15);
+            },
+            playImpact(vol = 0.2) {
+                if (!soundEnabled || !this.ctx) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(180, this.ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(60, this.ctx.currentTime + 0.12);
+                gain.gain.setValueAtTime(Math.min(vol, 0.4), this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.12);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.12);
+            },
+            playLoseLife() {
+                if (!soundEnabled || !this.ctx) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(300, this.ctx.currentTime);
+                osc.frequency.linearRampToValueAtTime(90, this.ctx.currentTime + 0.35);
+                gain.gain.setValueAtTime(0.4, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.35);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.35);
+            },
+            playMilestone() {
+                if (!soundEnabled || !this.ctx) return;
+                [523.25, 659.25, 783.99, 1046.50].forEach((freq, idx) => {
+                    const osc = this.ctx.createOscillator();
+                    const gain = this.ctx.createGain();
+                    osc.type = 'sine';
+                    osc.frequency.setValueAtTime(freq, this.ctx.currentTime + idx * 0.08);
+                    gain.gain.setValueAtTime(0.2, this.ctx.currentTime + idx * 0.08);
+                    gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + idx * 0.08 + 0.3);
+                    osc.connect(gain);
+                    gain.connect(this.ctx.destination);
+                    osc.start(this.ctx.currentTime + idx * 0.08);
+                    osc.stop(this.ctx.currentTime + idx * 0.08 + 0.3);
+                });
+            }
+        };
+
+        window.onload = function() {
+            initGame();
+        };
+
+        function initGame() {
+            const container = document.getElementById('canvas-container');
+            const width = container.clientWidth;
+            const height = container.clientHeight;
+
+            engine = Engine.create({ enableSleeping: false, gravity: { x: 0, y: 1.2 } });
+            world = engine.world;
+
+            render = Render.create({
+                element: container,
+                engine: engine,
+                options: { width, height, wireframes: false, background: 'transparent', pixelRatio: window.devicePixelRatio || 1 }
+            });
+            Render.run(render);
+
+            runner = Runner.create();
+            Runner.run(runner, engine);
+
+            recreatePlatforms();
+
+            Events.on(render, 'beforeRender', () => {
+                updateCameraAutoFit();
+                drawBackgroundGrid();
+            });
+
+            Events.on(render, 'afterRender', () => {
+                drawCustomOverlays();
+                updateParticles();
+            });
+
+            Events.on(engine, 'beforeUpdate', checkOutOfBoundsAndPhysics);
+            Events.on(engine, 'collisionStart', handleCollisions);
+
+            selectedShapeIndex = Math.floor(Math.random() * SHAPES.length);
+            nextShapeIndex = Math.floor(Math.random() * SHAPES.length);
+
+            buildShapeSelectorUI();
+            setupEventListeners();
+
+            pointerX = width / 2;
+            pointerY = height * 0.4;
+            document.getElementById('best-height-val').innerText = bestHeight.toFixed(1);
+            updateLivesUI();
+        }
+
+        function recreatePlatforms() {
+            const oldPlatforms = [
+                basePlatform, slopedRoofLeft, slopedRoofRight,
+                basePlatformP1, slopedRoofLeftP1, slopedRoofRightP1,
+                basePlatformP2, slopedRoofLeftP2, slopedRoofRightP2
+            ].filter(Boolean);
+
+            oldPlatforms.forEach(p => Composite.remove(world, p));
+
+            basePlatform = slopedRoofLeft = slopedRoofRight = null;
+            basePlatformP1 = slopedRoofLeftP1 = slopedRoofRightP1 = null;
+            basePlatformP2 = slopedRoofLeftP2 = slopedRoofRightP2 = null;
+
+            const container = document.getElementById('canvas-container');
+            const width = container ? container.clientWidth : window.innerWidth;
+            const height = container ? container.clientHeight : window.innerHeight;
+            const centerX = width / 2;
+            const baseY = height - 125; // Raised ~10cm (125px) above bottom controls
+
+            if (currentGameMode === 'single') {
+                basePlatform = Bodies.rectangle(centerX, baseY, CONFIG.BASE_WIDTH, CONFIG.BASE_HEIGHT, {
+                    isStatic: true,
+                    friction: currentMaterial.friction || 16.0,
+                    frictionStatic: currentMaterial.frictionStatic || 8000.0,
+                    render: { fillStyle: '#1e293b', strokeStyle: '#475569', lineWidth: 4 }
+                });
+                basePlatform.hasLanded = true;
+
+                const roofOffset = (CONFIG.BASE_WIDTH / 2) + 10;
+                slopedRoofLeft = Bodies.trapezoid(centerX - roofOffset, baseY - 35, 120, 30, 0.4, {
+                    isStatic: true,
+                    angle: -0.25,
+                    friction: 16.0,
+                    frictionStatic: 8000.0,
+                    render: { fillStyle: '#334155', strokeStyle: '#64748b', lineWidth: 2 }
+                });
+                slopedRoofLeft.hasLanded = true;
+
+                slopedRoofRight = Bodies.trapezoid(centerX + roofOffset, baseY - 35, 120, 30, 0.4, {
+                    isStatic: true,
+                    angle: 0.25,
+                    friction: 16.0,
+                    frictionStatic: 8000.0,
+                    render: { fillStyle: '#334155', strokeStyle: '#64748b', lineWidth: 2 }
+                });
+                slopedRoofRight.hasLanded = true;
+
+                Composite.add(world, [basePlatform, slopedRoofLeft, slopedRoofRight]);
+            } else {
+                // 2-Player Split-Screen Mode: Two Distinct Base Platforms
+                const platWidth = 340;
+                const p1CenterX = centerX - 220;
+                const p2CenterX = centerX + 220;
+
+                // Player 1 Base Platform (Indigo Glow)
+                basePlatformP1 = Bodies.rectangle(p1CenterX, baseY, platWidth, CONFIG.BASE_HEIGHT, {
+                    isStatic: true,
+                    friction: currentMaterial.friction || 16.0,
+                    frictionStatic: currentMaterial.frictionStatic || 8000.0,
+                    render: { fillStyle: '#1e1b4b', strokeStyle: '#6366f1', lineWidth: 4 }
+                });
+                basePlatformP1.hasLanded = true;
+
+                const roofOffsetP1 = (platWidth / 2) + 8;
+                slopedRoofLeftP1 = Bodies.trapezoid(p1CenterX - roofOffsetP1, baseY - 30, 80, 25, 0.4, {
+                    isStatic: true, angle: -0.25, friction: 16.0, frictionStatic: 8000.0,
+                    render: { fillStyle: '#312e81', strokeStyle: '#818cf8', lineWidth: 2 }
+                });
+                slopedRoofLeftP1.hasLanded = true;
+
+                slopedRoofRightP1 = Bodies.trapezoid(p1CenterX + roofOffsetP1, baseY - 30, 80, 25, 0.4, {
+                    isStatic: true, angle: 0.25, friction: 16.0, frictionStatic: 8000.0,
+                    render: { fillStyle: '#312e81', strokeStyle: '#818cf8', lineWidth: 2 }
+                });
+                slopedRoofRightP1.hasLanded = true;
+
+                // Player 2 Base Platform (Rose Glow)
+                basePlatformP2 = Bodies.rectangle(p2CenterX, baseY, platWidth, CONFIG.BASE_HEIGHT, {
+                    isStatic: true,
+                    friction: currentMaterial.friction || 16.0,
+                    frictionStatic: currentMaterial.frictionStatic || 8000.0,
+                    render: { fillStyle: '#4c0519', strokeStyle: '#f43f5e', lineWidth: 4 }
+                });
+                basePlatformP2.hasLanded = true;
+
+                const roofOffsetP2 = (platWidth / 2) + 8;
+                slopedRoofLeftP2 = Bodies.trapezoid(p2CenterX - roofOffsetP2, baseY - 30, 80, 25, 0.4, {
+                    isStatic: true, angle: -0.25, friction: 16.0, frictionStatic: 8000.0,
+                    render: { fillStyle: '#881337', strokeStyle: '#fb7185', lineWidth: 2 }
+                });
+                slopedRoofLeftP2.hasLanded = true;
+
+                slopedRoofRightP2 = Bodies.trapezoid(p2CenterX + roofOffsetP2, baseY - 30, 80, 25, 0.4, {
+                    isStatic: true, angle: 0.25, friction: 16.0, frictionStatic: 8000.0,
+                    render: { fillStyle: '#881337', strokeStyle: '#fb7185', lineWidth: 2 }
+                });
+                slopedRoofRightP2.hasLanded = true;
+
+                Composite.add(world, [
+                    basePlatformP1, slopedRoofLeftP1, slopedRoofRightP1,
+                    basePlatformP2, slopedRoofLeftP2, slopedRoofRightP2
+                ]);
+            }
+        }
+
+        function setupEventListeners() {
+            const container = document.getElementById('canvas-container');
+
+            const updatePointerPos = (clientX, clientY) => {
+                if (!render || !render.canvas || !render.bounds) return;
+                const canvasRect = render.canvas.getBoundingClientRect();
+                const relativeX = (clientX - canvasRect.left) / canvasRect.width;
+                const relativeY = (clientY - canvasRect.top) / canvasRect.height;
+                const bounds = render.bounds;
+                const wx = bounds.min.x + relativeX * (bounds.max.x - bounds.min.x);
+                const wy = bounds.min.y + relativeY * (bounds.max.y - bounds.min.y);
+
+                if (currentGameMode === 'versus') {
+                    if (relativeX < 0.5) { pointerX = wx; pointerY = wy; }
+                    else { p2PointerX = wx; p2PointerY = wy; }
+                } else {
+                    pointerX = wx; pointerY = wy;
+                }
+            };
+
+            container.addEventListener('mousemove', (e) => updatePointerPos(e.clientX, e.clientY));
+            container.addEventListener('pointermove', (e) => updatePointerPos(e.clientX, e.clientY));
+
+            container.addEventListener('touchstart', (e) => {
+                if (e.touches.length > 0) updatePointerPos(e.touches[0].clientX, e.touches[0].clientY);
+            }, { passive: true });
+
+            container.addEventListener('touchmove', (e) => {
+                if (e.touches.length > 0) updatePointerPos(e.touches[0].clientX, e.touches[0].clientY);
+            }, { passive: true });
+
+            container.addEventListener('click', (e) => {
+                if (isGameOver) return;
+                sfx.init();
+                updatePointerPos(e.clientX, e.clientY);
+                const canvasRect = render.canvas.getBoundingClientRect();
+                const relativeX = (e.clientX - canvasRect.left) / canvasRect.width;
+
+                if (currentGameMode === 'versus' && relativeX >= 0.5) {
+                    triggerDropPlayer2();
+                } else {
+                    triggerDrop();
+                }
+            });
+
+            container.addEventListener('wheel', (e) => {
+                if (isGameOver) return;
+                rotatePiece(e.deltaY > 0 ? 15 : -15);
+            }, { passive: true });
+
+            window.addEventListener('keydown', (e) => {
+                sfx.init();
+                if (isGameOver) return;
+                if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') rotatePiece(-15);
+                else if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') rotatePiece(15);
+                else if (e.key === ' ' || e.key === 'Spacebar') { e.preventDefault(); triggerDrop(); }
+
+                if (currentGameMode === 'versus') {
+                    if (e.key === 'ArrowLeft') p2Rotation -= Math.PI / 12;
+                    else if (e.key === 'ArrowRight') p2Rotation += Math.PI / 12;
+                    else if (e.key === 'ArrowDown' || e.key === 'Enter') { e.preventDefault(); triggerDropPlayer2(); }
+                }
+            });
+
+            window.addEventListener('resize', () => {
+                if (!render) return;
+                const w = window.innerWidth;
+                const h = window.innerHeight;
+                render.canvas.width = w * (window.devicePixelRatio || 1);
+                render.canvas.height = h * (window.devicePixelRatio || 1);
+                render.options.width = w;
+                render.options.height = h;
+            });
+        }
+
+        function rotatePiece(deltaDegrees) {
+            currentRotation += (deltaDegrees * Math.PI) / 180;
+        }
+
+        function updateFrictionFromSlider(val) {
+            const percent = parseFloat(val);
+            const textEl = document.getElementById('friction-val-text');
+            if (textEl) textEl.innerText = `${percent.toFixed(0)}%`;
+
+            const norm = percent / 100;
+            const frictionVal = norm === 0 ? 0 : (norm === 1 ? 500.0 : Math.pow(norm, 2) * 100.0);
+            const frictionStaticVal = norm === 0 ? 0 : (norm === 1 ? 5000.0 : Math.pow(norm, 2) * 1000.0);
+
+            currentMaterial.friction = frictionVal;
+            currentMaterial.frictionStatic = frictionStaticVal;
+
+            [
+                basePlatform, slopedRoofLeft, slopedRoofRight,
+                basePlatformP1, slopedRoofLeftP1, slopedRoofRightP1,
+                basePlatformP2, slopedRoofLeftP2, slopedRoofRightP2,
+                ...placedBodies, ...p2PlacedBodies
+            ].forEach(b => {
+                if (b) {
+                    b.friction = frictionVal;
+                    b.frictionStatic = frictionStaticVal;
+                }
+            });
+        }
+
+        function setMaterial(matType) {
+            document.querySelectorAll('.mat-btn').forEach(btn => {
+                btn.className = 'mat-btn px-2.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1 text-slate-400 hover:text-white';
+            });
+
+            const slider = document.getElementById('friction-range');
+            const activeBtn = document.getElementById(`mat-${matType}`);
+            let targetRestitution = 0.005;
+
+            if (matType === 'wood') {
+                if (slider) slider.value = 80;
+                updateFrictionFromSlider(80);
+                targetRestitution = 0.005;
+                if (activeBtn) activeBtn.className = 'mat-btn px-2.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1 bg-amber-600 text-white shadow';
+            } else if (matType === 'ice') {
+                if (slider) slider.value = 0;
+                updateFrictionFromSlider(0);
+                targetRestitution = 0.0;
+                if (activeBtn) activeBtn.className = 'mat-btn px-2.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1 bg-cyan-600 text-white shadow';
+            } else if (matType === 'rubber') {
+                if (slider) slider.value = 95;
+                updateFrictionFromSlider(95);
+                targetRestitution = 0.15;
+                if (activeBtn) activeBtn.className = 'mat-btn px-2.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1 bg-emerald-600 text-white shadow';
+            } else if (matType === 'steel') {
+                if (slider) slider.value = 70;
+                updateFrictionFromSlider(70);
+                targetRestitution = 0.001;
+                if (activeBtn) activeBtn.className = 'mat-btn px-2.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1 bg-slate-600 text-white shadow';
+            }
+
+            currentMaterial.restitution = targetRestitution;
+            [...placedBodies, ...p2PlacedBodies].forEach(b => { if (b) b.restitution = targetRestitution; });
+        }
+
+        function triggerDrop() {
+            if (isGameOver) return;
+            sfx.init();
+
+            const shapeDef = SHAPES[selectedShapeIndex];
+            const spawnX = pointerX;
+            const spawnY = pointerY;
+
+            const matProps = {
+                density: currentMaterial.density,
+                friction: currentMaterial.friction,
+                frictionStatic: currentMaterial.frictionStatic,
+                frictionAir: currentMaterial.frictionAir || 0.015,
+                restitution: currentMaterial.restitution,
+                render: { fillStyle: shapeDef.color, strokeStyle: '#ffffff', lineWidth: 2.5 }
+            };
+
+            const newBody = shapeDef.create(spawnX, spawnY, currentRotation, matProps);
+            newBody.isPlacedPiece = true;
+            newBody.hasLanded = false;
+
+            Composite.add(world, newBody);
+            placedBodies.push(newBody);
+
+            sfx.playDrop();
+            spawnParticles(spawnX, spawnY, 10, shapeDef.color);
+
+            selectedShapeIndex = nextShapeIndex;
+            nextShapeIndex = Math.floor(Math.random() * SHAPES.length);
+            buildShapeSelectorUI();
+        }
+
+        function triggerDropPlayer2() {
+            if (isGameOver || currentGameMode !== 'versus') return;
+            sfx.init();
+
+            const shapeDef = SHAPES[p2SelectedShapeIndex];
+            const spawnX = p2PointerX || (window.innerWidth * 0.75);
+            const spawnY = p2PointerY || (window.innerHeight * 0.4);
+
+            const matProps = {
+                density: currentMaterial.density,
+                friction: currentMaterial.friction,
+                frictionStatic: currentMaterial.frictionStatic,
+                frictionAir: currentMaterial.frictionAir || 0.015,
+                restitution: currentMaterial.restitution,
+                render: { fillStyle: '#f43f5e', strokeStyle: '#ffffff', lineWidth: 2.5 }
+            };
+
+            const newBody = shapeDef.create(spawnX, spawnY, p2Rotation, matProps);
+            newBody.isPlacedPiece = true;
+            newBody.hasLanded = false;
+            newBody.belongsToP2 = true;
+
+            Composite.add(world, newBody);
+            p2PlacedBodies.push(newBody);
+
+            sfx.playDrop();
+            spawnParticles(spawnX, spawnY, 10, '#f43f5e');
+
+            p2SelectedShapeIndex = p2NextShapeIndex;
+            p2NextShapeIndex = Math.floor(Math.random() * SHAPES.length);
+        }
+
+        function handleCollisions(event) {
+            const pairs = event.pairs;
+            for (let i = 0; i < pairs.length; i++) {
+                const { bodyA, bodyB } = pairs[i];
+                if (bodyA.isPlacedPiece && bodyB.hasLanded) {
+                    bodyA.hasLanded = true;
+                    sfx.playImpact(0.2);
+                    spawnParticles(bodyA.position.x, bodyA.position.y, 6, bodyA.render.fillStyle || '#ffffff');
+                }
+                if (bodyB.isPlacedPiece && bodyA.hasLanded) {
+                    bodyB.hasLanded = true;
+                    sfx.playImpact(0.2);
+                    spawnParticles(bodyB.position.x, bodyB.position.y, 6, bodyB.render.fillStyle || '#ffffff');
+                }
+            }
+            calculateHeight();
+        }
+
+        function checkOutOfBoundsAndPhysics() {
+            if (isGameOver) return;
+
+            if (engine && engine.pairs && engine.pairs.list) {
+                const pairs = engine.pairs.list;
+                for (let i = 0; i < pairs.length; i++) {
+                    const pair = pairs[i];
+                    pair.friction = Math.max(pair.bodyA.friction, pair.bodyB.friction);
+                    pair.frictionStatic = Math.max(pair.bodyA.frictionStatic, pair.bodyB.frictionStatic);
+                }
+            }
+
+            const fallLimitP1 = (basePlatformP1 || basePlatform || { position: { y: window.innerHeight - 50 } }).position.y + 150;
+            const fallLimitP2 = (basePlatformP2 || basePlatform || { position: { y: window.innerHeight - 50 } }).position.y + 150;
+            let newlyLostBodies = [];
+
+            for (let i = placedBodies.length - 1; i >= 0; i--) {
+                const b = placedBodies[i];
+                if (b.position.y > fallLimitP1) {
+                    newlyLostBodies.push(b);
+                    placedBodies.splice(i, 1);
+                    Composite.remove(world, b);
+                }
+            }
+
+            if (newlyLostBodies.length > 0) {
+                newlyLostBodies.forEach(b => spawnParticles(b.position.x, fallLimitP1, 20, '#ef4444'));
+                lives--;
+                updateLivesUI();
+                sfx.playLoseLife();
+                if (lives <= 0) triggerGameOver();
+            }
+
+            if (currentGameMode === 'versus') {
+                let p2Lost = [];
+                for (let i = p2PlacedBodies.length - 1; i >= 0; i--) {
+                    const b = p2PlacedBodies[i];
+                    if (b.position.y > fallLimitP2) {
+                        p2Lost.push(b);
+                        p2PlacedBodies.splice(i, 1);
+                        Composite.remove(world, b);
+                    }
+                }
+                if (p2Lost.length > 0) {
+                    p2Lost.forEach(b => spawnParticles(b.position.x, fallLimitP2, 20, '#ef4444'));
+                    p2Lives--;
+                    updateVersusLivesUI();
+                    sfx.playLoseLife();
+                    if (p2Lives <= 0) checkVersusWinCondition();
+                }
+            }
+
+            calculateHeight();
+        }
+
+        function calculateHeight() {
+            const refP1 = basePlatformP1 || basePlatform;
+            const refP2 = basePlatformP2 || basePlatform;
+
+            let highestY = refP1 ? (refP1.position.y - CONFIG.BASE_HEIGHT / 2) : window.innerHeight;
+            let p2HighestY = refP2 ? (refP2.position.y - CONFIG.BASE_HEIGHT / 2) : window.innerHeight;
+
+            placedBodies.forEach(b => {
+                if (b.hasLanded) {
+                    b.vertices.forEach(v => { if (v.y < highestY) highestY = v.y; });
+                }
+            });
+
+            p2PlacedBodies.forEach(b => {
+                if (b.hasLanded) {
+                    b.vertices.forEach(v => { if (v.y < p2HighestY) p2HighestY = v.y; });
+                }
+            });
+
+            const basePY1 = refP1 ? (refP1.position.y - CONFIG.BASE_HEIGHT / 2) : window.innerHeight;
+            const heightPixels = basePY1 - highestY;
+            const newHeightMeter = Math.max(0, heightPixels * CONFIG.SCALE_METERS_PER_PIXEL);
+
+            if (Math.floor(newHeightMeter / 10) > Math.floor(currentHeight / 10) && newHeightMeter >= 10) {
+                showMilestoneBanner(Math.floor(newHeightMeter / 10) * 10);
+                sfx.playMilestone();
+            }
+
+            currentHeight = newHeightMeter;
+            document.getElementById('height-val').innerText = currentHeight.toFixed(1);
+
+            if (currentHeight > bestHeight) {
+                bestHeight = currentHeight;
+                localStorage.setItem('geo_stacker_best', bestHeight.toFixed(1));
+                document.getElementById('best-height-val').innerText = bestHeight.toFixed(1);
+            }
+
+            if (currentGameMode === 'versus') {
+                const basePY2 = refP2 ? (refP2.position.y - CONFIG.BASE_HEIGHT / 2) : window.innerHeight;
+                p2CurrentHeight = Math.max(0, (basePY2 - p2HighestY) * CONFIG.SCALE_METERS_PER_PIXEL);
+                updateVersusLivesUI();
+                checkVersusWinCondition();
+            }
+        }
+
+        function updateCameraAutoFit() {
+            const container = document.getElementById('canvas-container');
+            if (!container) return;
+            const viewW = container.clientWidth;
+            const viewH = container.clientHeight;
+
+            const refP1 = basePlatformP1 || basePlatform;
+            const refP2 = basePlatformP2 || basePlatform;
+            if (!refP1) return;
+
+            let minX = (refP1 ? refP1.position.x - 180 : viewW / 2 - 360) - 80;
+            let maxX = (refP2 ? refP2.position.x + 180 : viewW / 2 + 360) + 80;
+            let baseYVal = refP1.position.y;
+
+            let minY = baseYVal - CONFIG.BASE_HEIGHT / 2 - 180;
+            let maxY = baseYVal + CONFIG.BASE_HEIGHT / 2 + 20;
+
+            const allBodies = [...placedBodies, ...p2PlacedBodies];
+            allBodies.forEach(b => {
+                if (b && b.vertices) {
+                    b.vertices.forEach(v => {
+                        if (v.x < minX) minX = v.x;
+                        if (v.x > maxX) maxX = v.x;
+                        if (v.y < minY) minY = v.y;
+                    });
+                }
+            });
+
+            const contentW = Math.max((maxX - minX), 720);
+            const contentH = Math.max(300, maxY - minY);
+
+            const zoomX = viewW / contentW;
+            const zoomY = viewH / (contentH + 60);
+            const targetZoom = Math.max(0.25, Math.min(1.0, Math.min(zoomX, zoomY) * 0.9));
+
+            camera.zoom += (targetZoom - camera.zoom) * 0.08;
+
+            const desiredBottomWorldY = baseYVal + (CONFIG.BASE_HEIGHT / 2) + (125 / camera.zoom);
+            const targetCenterY = desiredBottomWorldY - (viewH / 2) / camera.zoom;
+            const targetCenterX = (minX + maxX) / 2;
+
+            camera.x += (targetCenterX - camera.x) * 0.08;
+            camera.y += (targetCenterY - camera.y) * 0.08;
+
+            Render.lookAt(render, {
+                min: { x: camera.x - (viewW / 2) / camera.zoom, y: camera.y - (viewH / 2) / camera.zoom },
+                max: { x: camera.x + (viewW / 2) / camera.zoom, y: camera.y + (viewH / 2) / camera.zoom }
+            });
+        }
+
+        function drawBackgroundGrid() {
+            const ctx = render.context;
+            const w = render.options.width;
+            const h = render.options.height;
+
+            ctx.save();
+            ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+            if (isARActive && videoElement && videoElement.readyState >= 2) {
+                ctx.save();
+                ctx.translate(w, 0);
+                ctx.scale(-1, 1);
+                ctx.drawImage(videoElement, 0, 0, w, h);
+                ctx.restore();
+                ctx.fillStyle = 'rgba(15, 23, 42, 0.55)';
+                ctx.fillRect(0, 0, w, h);
+            } else {
+                const gradient = ctx.createLinearGradient(0, 0, 0, h);
+                gradient.addColorStop(0, '#090d16');
+                gradient.addColorStop(1, '#0f172a');
+                ctx.fillStyle = gradient;
+                ctx.fillRect(0, 0, w, h);
+            }
+
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.03)';
+            ctx.lineWidth = 1;
+            const gridSize = 40 * camera.zoom;
+            const offsetX = (-camera.x * camera.zoom) % gridSize;
+            const offsetY = (-camera.y * camera.zoom) % gridSize;
+
+            for (let x = offsetX; x < w; x += gridSize) {
+                ctx.beginPath();
+                ctx.moveTo(x, 0);
+                ctx.lineTo(x, h);
+                ctx.stroke();
+            }
+
+            for (let y = offsetY; y < h; y += gridSize) {
+                ctx.beginPath();
+                ctx.moveTo(0, y);
+                ctx.lineTo(w, y);
+                ctx.stroke();
+            }
+
+            ctx.restore();
+        }
+
+        function drawHandLandmarks(ctx) {
+            if (!isARActive || !allHandLandmarks || allHandLandmarks.length === 0) return;
+            const bounds = render.bounds;
+
+            allHandLandmarks.forEach((landmarks) => {
+                const isP2 = (currentGameMode === 'versus' && (1 - landmarks[9].x) >= 0.5);
+                const state = isP2 ? p2ArHandState : arHandState;
+                const color = state === 'fist' ? '#ef4444' : (isP2 ? '#f43f5e' : '#10b981');
+
+                landmarks.forEach((pt) => {
+                    const normX = 1 - pt.x;
+                    const normY = pt.y;
+                    const wx = bounds.min.x + normX * (bounds.max.x - bounds.min.x);
+                    const wy = bounds.min.y + normY * (bounds.max.y - bounds.min.y);
+
+                    ctx.beginPath();
+                    ctx.arc(wx, wy, 4 / camera.zoom, 0, Math.PI * 2);
+                    ctx.fillStyle = color;
+                    ctx.fill();
+                    ctx.strokeStyle = '#ffffff';
+                    ctx.lineWidth = 1 / camera.zoom;
+                    ctx.stroke();
+                });
+            });
+        }
+
+        function drawCustomOverlays() {
+            const ctx = render.context;
+            Render.startViewTransform(render);
+
+            drawHandLandmarks(ctx);
+
+            const spawnX = pointerX;
+            const spawnY = pointerY;
+            const basePY1 = (basePlatformP1 || basePlatform || { position: { y: window.innerHeight - 50 } }).position.y;
+            const basePY2 = (basePlatformP2 || basePlatform || { position: { y: window.innerHeight - 50 } }).position.y;
+
+            ctx.save();
+
+            // Central Split Divider in Versus Mode
+            if (currentGameMode === 'versus') {
+                const container = document.getElementById('canvas-container');
+                const viewW = container ? container.clientWidth : window.innerWidth;
+                const centerX = viewW / 2;
+
+                ctx.setLineDash([12, 8]);
+                ctx.strokeStyle = 'rgba(255, 255, 255, 0.25)';
+                ctx.lineWidth = 3 / camera.zoom;
+                ctx.beginPath();
+                ctx.moveTo(centerX, camera.y - 2000);
+                ctx.lineTo(centerX, camera.y + 2000);
+                ctx.stroke();
+                ctx.setLineDash([]);
+
+                if (basePlatformP1) {
+                    ctx.fillStyle = '#6366f1';
+                    ctx.font = `bold ${Math.round(14 / camera.zoom)}px Prompt, sans-serif`;
+                    ctx.textAlign = 'center';
+                    ctx.fillText('แท่นวาง P1 (ฝั่งซ้าย)', basePlatformP1.position.x, basePlatformP1.position.y + 40);
+                }
+
+                if (basePlatformP2) {
+                    ctx.fillStyle = '#f43f5e';
+                    ctx.font = `bold ${Math.round(14 / camera.zoom)}px Prompt, sans-serif`;
+                    ctx.textAlign = 'center';
+                    ctx.fillText('แท่นวาง P2 (ฝั่งขวา)', basePlatformP2.position.x, basePlatformP2.position.y + 40);
+                }
+            }
+
+            // 1. Drop Target Line P1
+            ctx.setLineDash([6, 6]);
+            ctx.strokeStyle = isARActive && arHandState === 'fist' ? 'rgba(239, 68, 68, 0.7)' : 'rgba(99, 102, 241, 0.5)';
+            ctx.lineWidth = 2 / camera.zoom;
+            ctx.beginPath();
+            ctx.moveTo(spawnX, spawnY);
+            ctx.lineTo(spawnX, basePY1 + 100);
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            // 2. Ghost Shape Preview (P1)
+            const shapeDef = SHAPES[selectedShapeIndex];
+            const previewBody = shapeDef.create(spawnX, spawnY, currentRotation, { friction: 0 });
+
+            ctx.fillStyle = (isARActive && arHandState === 'fist' ? '#ef4444' : shapeDef.color) + '66';
+            ctx.strokeStyle = isARActive && arHandState === 'fist' ? '#ef4444' : shapeDef.color;
+            ctx.lineWidth = 2.5 / camera.zoom;
+
+            ctx.beginPath();
+            const verts = previewBody.vertices;
+            if (verts && verts.length > 0) {
+                ctx.moveTo(verts[0].x, verts[0].y);
+                for (let j = 1; j < verts.length; j++) ctx.lineTo(verts[j].x, verts[j].y);
+                ctx.closePath();
+                ctx.fill();
+                ctx.stroke();
+            }
+
+            // Arrow Marker P1
+            const arrowOffset = 45 / camera.zoom;
+            const arrowSize = 8 / camera.zoom;
+            ctx.fillStyle = isARActive && arHandState === 'fist' ? '#ef4444' : shapeDef.color;
+            ctx.beginPath();
+            ctx.moveTo(spawnX, spawnY - arrowOffset);
+            ctx.lineTo(spawnX - arrowSize, spawnY - arrowOffset - arrowSize * 1.5);
+            ctx.lineTo(spawnX + arrowSize, spawnY - arrowOffset - arrowSize * 1.5);
+            ctx.closePath();
+            ctx.fill();
+
+            // 3. Drop Line & Ghost Preview for P2 in Versus Mode
+            if (currentGameMode === 'versus') {
+                const p2SpawnX = p2PointerX || (window.innerWidth * 0.75);
+                const p2SpawnY = p2PointerY || (window.innerHeight * 0.4);
+
+                ctx.setLineDash([6, 6]);
+                ctx.strokeStyle = isARActive && p2ArHandState === 'fist' ? 'rgba(239, 68, 68, 0.8)' : 'rgba(244, 63, 94, 0.6)';
+                ctx.lineWidth = 2 / camera.zoom;
+                ctx.beginPath();
+                ctx.moveTo(p2SpawnX, p2SpawnY);
+                ctx.lineTo(p2SpawnX, basePY2 + 100);
+                ctx.stroke();
+                ctx.setLineDash([]);
+
+                const p2Def = SHAPES[p2SelectedShapeIndex];
+                const p2Preview = p2Def.create(p2SpawnX, p2SpawnY, p2Rotation, { friction: 0 });
+
+                ctx.fillStyle = (isARActive && p2ArHandState === 'fist' ? '#ef4444' : '#f43f5e') + '66';
+                ctx.strokeStyle = isARActive && p2ArHandState === 'fist' ? '#ef4444' : '#f43f5e';
+                ctx.lineWidth = 2.5 / camera.zoom;
+                ctx.beginPath();
+                const p2Verts = p2Preview.vertices;
+                if (p2Verts && p2Verts.length > 0) {
+                    ctx.moveTo(p2Verts[0].x, p2Verts[0].y);
+                    for (let j = 1; j < p2Verts.length; j++) ctx.lineTo(p2Verts[j].x, p2Verts[j].y);
+                    ctx.closePath();
+                    ctx.fill();
+                    ctx.stroke();
+                }
+
+                ctx.fillStyle = isARActive && p2ArHandState === 'fist' ? '#ef4444' : '#f43f5e';
+                ctx.beginPath();
+                ctx.moveTo(p2SpawnX, p2SpawnY - arrowOffset);
+                ctx.lineTo(p2SpawnX - arrowSize, p2SpawnY - arrowOffset - arrowSize * 1.5);
+                ctx.lineTo(p2SpawnX + arrowSize, p2SpawnY - arrowOffset - arrowSize * 1.5);
+                ctx.closePath();
+                ctx.fill();
+            }
+
+            ctx.restore();
+            Render.endViewTransform(render);
+        }
+
+        async function toggleARMode() {
+            const btn = document.getElementById('ar-btn');
+            const icon = document.getElementById('ar-icon');
+            const text = document.getElementById('ar-text');
+            const statusHud = document.getElementById('ar-status-hud');
+
+            if (isARActive) {
+                isARActive = false;
+                allHandLandmarks = [];
+                if (cameraInstance) { cameraInstance.stop(); cameraInstance = null; }
+                btn.className = 'glass-panel px-3.5 h-10 rounded-2xl flex items-center gap-2 text-indigo-300 hover:text-white hover:bg-indigo-900/40 transition-all shadow-lg active:scale-95 font-semibold text-xs border border-indigo-500/40';
+                icon.className = 'fa-solid fa-camera text-indigo-400';
+                text.innerText = 'โหมด AR มือ';
+                statusHud.classList.add('hidden');
+                return;
+            }
+
+            btn.className = 'glass-panel px-3.5 h-10 rounded-2xl flex items-center gap-2 text-amber-300 bg-amber-950/40 border border-amber-500/40 transition-all shadow-lg text-xs font-semibold';
+            icon.className = 'fa-solid fa-spinner fa-spin text-amber-400';
+            text.innerText = 'กำลังเปิดกล้อง...';
+
+            videoElement = document.getElementById('webcam-video');
+
+            try {
+                if (typeof Hands === 'undefined') throw new Error('MediaPipe Hands library not loaded');
+
+                handsDetector = new Hands({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}` });
+                handsDetector.setOptions({ maxNumHands: 2, modelComplexity: 1, minDetectionConfidence: 0.65, minTrackingConfidence: 0.65 });
+                handsDetector.onResults(onHandResults);
+
+                cameraInstance = new Camera(videoElement, {
+                    onFrame: async () => {
+                        if (isARActive && handsDetector) await handsDetector.send({ image: videoElement });
+                    },
+                    width: 640,
+                    height: 480
+                });
+
+                await cameraInstance.start();
+                isARActive = true;
+
+                btn.className = 'glass-panel px-3.5 h-10 rounded-2xl flex items-center gap-2 text-emerald-300 bg-emerald-950/50 border border-emerald-500/50 transition-all shadow-lg text-xs font-semibold';
+                icon.className = 'fa-solid fa-hand text-emerald-400';
+                text.innerText = 'ปิดโหมด AR';
+                statusHud.classList.remove('hidden');
+            } catch (err) {
+                console.error('AR Mode Error:', err);
+                alert('ไม่สามารถเข้าถึงกล้องได้ โปรดตรวจสอบการอนุญาต');
+                btn.className = 'glass-panel px-3.5 h-10 rounded-2xl flex items-center gap-2 text-indigo-300 hover:text-white hover:bg-indigo-900/40 transition-all shadow-lg active:scale-95 font-semibold text-xs border border-indigo-500/40';
+                icon.className = 'fa-solid fa-camera text-indigo-400';
+                text.innerText = 'โหมด AR มือ';
+                isARActive = false;
+            }
+        }
+
+        function onHandResults(results) {
+            if (!isARActive || !results.multiHandLandmarks || results.multiHandLandmarks.length === 0) {
+                allHandLandmarks = [];
+                return;
+            }
+
+            allHandLandmarks = results.multiHandLandmarks;
+            if (!render || !render.bounds) return;
+
+            const bounds = render.bounds;
+            const landmarksList = results.multiHandLandmarks;
+
+            landmarksList.forEach((landmarks) => {
+                const normX = 1 - landmarks[9].x;
+                const normY = landmarks[9].y;
+                const wx = bounds.min.x + normX * (bounds.max.x - bounds.min.x);
+                const wy = bounds.min.y + normY * (bounds.max.y - bounds.min.y);
+
+                const wrist = landmarks[0];
+                const middleMCP = landmarks[9];
+                const dx = (1 - middleMCP.x) - (1 - wrist.x);
+                const dy = middleMCP.y - wrist.y;
+                const angleRad = Math.atan2(dy, dx) + Math.PI / 2;
+
+                const fingerTips = [8, 12, 16, 20];
+                let totalDist = 0;
+                fingerTips.forEach(tipIdx => {
+                    const tip = landmarks[tipIdx];
+                    totalDist += Math.hypot(tip.x - wrist.x, tip.y - wrist.y);
+                });
+                const palmScale = Math.hypot(middleMCP.x - wrist.x, middleMCP.y - wrist.y);
+                const isFist = (totalDist / (4 * palmScale)) < 1.35;
+
+                if (currentGameMode === 'versus') {
+                    if (normX < 0.5) {
+                        pointerX = wx; pointerY = wy;
+                        currentRotation = angleRad;
+                        arHandState = isFist ? 'fist' : 'open';
+                        if (lastARHandState === 'open' && arHandState === 'fist') { sfx.init(); triggerDrop(); }
+                        lastARHandState = arHandState;
+                    } else {
+                        p2PointerX = wx; p2PointerY = wy;
+                        p2Rotation = angleRad;
+                        p2ArHandState = isFist ? 'fist' : 'open';
+                        if (lastP2ArHandState === 'open' && p2ArHandState === 'fist') { sfx.init(); triggerDropPlayer2(); }
+                        lastP2ArHandState = p2ArHandState;
+                    }
+                } else {
+                    pointerX = wx; pointerY = wy;
+                    currentRotation = angleRad;
+                    arHandState = isFist ? 'fist' : 'open';
+                    if (lastARHandState === 'open' && arHandState === 'fist') { sfx.init(); triggerDrop(); }
+                    lastARHandState = arHandState;
+                }
+            });
+
+            const badge = document.getElementById('ar-gesture-badge');
+            const text = document.getElementById('ar-gesture-text');
+            const deg = Math.round((currentRotation * 180) / Math.PI);
+
+            if (arHandState === 'fist') {
+                if (badge) badge.className = 'px-2.5 py-1 rounded-xl text-xs font-black bg-red-500/20 text-red-300 border border-red-500/40 flex items-center gap-1.5';
+                if (text) text.innerText = `กำมือ (ปล่อยวาง!) [${deg}°]`;
+            } else {
+                if (badge) badge.className = 'px-2.5 py-1 rounded-xl text-xs font-black bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 flex items-center gap-1.5';
+                if (text) text.innerText = `แบมือ (เล็งตำแหน่ง) [${deg}°]`;
+            }
+        }
+
+        function spawnParticles(x, y, count, color) {
+            for (let i = 0; i < count; i++) {
+                particles.push({
+                    x: x, y: y,
+                    vx: (Math.random() - 0.5) * 7,
+                    vy: (Math.random() - 0.5) * 7 - 2,
+                    radius: Math.random() * 4 + 2,
+                    color: color,
+                    alpha: 1,
+                    decay: Math.random() * 0.03 + 0.02
+                });
+            }
+        }
+
+        function updateParticles() {
+            const ctx = render.context;
+            for (let i = particles.length - 1; i >= 0; i--) {
+                const p = particles[i];
+                p.x += p.vx;
+                p.y += p.vy;
+                p.alpha -= p.decay;
+
+                if (p.alpha <= 0) {
+                    particles.splice(i, 1);
+                    continue;
+                }
+
+                ctx.save();
+                ctx.globalAlpha = p.alpha;
+                ctx.fillStyle = p.color;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+            }
+        }
+
+        function buildShapeSelectorUI() {
+            const container = document.getElementById('shape-selector');
+            if (!container) return;
+
+            const currentShape = SHAPES[selectedShapeIndex];
+            const nextShape = SHAPES[nextShapeIndex];
+
+            container.innerHTML = `
+                <div class="flex items-center gap-3">
+                    <div class="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-indigo-950/80 border border-indigo-500/50 text-xs font-bold text-white shadow">
+                        <span class="text-[10px] text-indigo-300 uppercase tracking-wide">ปัจจุบัน:</span>
+                        <i class="fa-solid ${currentShape.icon}" style="color:${currentShape.color}"></i>
+                        <span>${currentShape.name}</span>
+                    </div>
+                    <div class="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-800/80 border border-slate-700 text-xs font-medium text-slate-300">
+                        <span class="text-[10px] text-slate-400 uppercase tracking-wide">ถัดไป:</span>
+                        <i class="fa-solid ${nextShape.icon}" style="color:${nextShape.color}"></i>
+                        <span>${nextShape.name}</span>
+                    </div>
+                </div>
+            `;
+        }
+
+        function updateLivesUI() {
+            const container = document.getElementById('lives-container');
+            if (!container) return;
+            container.innerHTML = '';
+            for (let i = 0; i < CONFIG.MAX_LIVES; i++) {
+                container.innerHTML += i < lives ? `<i class="fa-solid fa-heart text-red-500"></i>` : `<i class="fa-regular fa-heart text-slate-600"></i>`;
+            }
+        }
+
+        function updateVersusLivesUI() {
+            const p1Container = document.getElementById('p1-lives');
+            const p2Container = document.getElementById('p2-lives');
+            if (p1Container) p1Container.innerHTML = Array.from({ length: lives }, () => '<i class="fa-solid fa-heart text-indigo-400"></i>').join('');
+            if (p2Container) p2Container.innerHTML = Array.from({ length: p2Lives }, () => '<i class="fa-solid fa-heart text-rose-500"></i>').join('');
+            document.getElementById('p1-height-text').innerText = `${currentHeight.toFixed(1)} m`;
+            document.getElementById('p2-height-text').innerText = `${p2CurrentHeight.toFixed(1)} m`;
+        }
+
+        function toggleGameMode() {
+            if (currentGameMode === 'single') {
+                currentGameMode = 'versus';
+                document.getElementById('mode-text').innerText = 'โหมดเล่นคนเดียว';
+                document.getElementById('mode-btn').className = 'glass-panel px-3.5 h-10 rounded-2xl flex items-center gap-2 text-rose-300 bg-rose-950/40 border border-rose-500/40 transition-all shadow-lg text-xs font-semibold';
+                document.getElementById('versus-hud-bar').classList.remove('hidden');
+            } else {
+                currentGameMode = 'single';
+                document.getElementById('mode-text').innerText = 'โหมดแข่ง 2 คน';
+                document.getElementById('mode-btn').className = 'glass-panel px-3.5 h-10 rounded-2xl flex items-center gap-2 text-indigo-300 hover:text-white hover:bg-indigo-900/40 transition-all shadow-lg active:scale-95 font-semibold text-xs border border-indigo-500/40';
+                document.getElementById('versus-hud-bar').classList.add('hidden');
+            }
+            restartGame();
+        }
+
+        function showMilestoneBanner(heightVal) {
+            const container = document.getElementById('milestone-container');
+            if (!container) return;
+            const banner = document.createElement('div');
+            banner.className = 'milestone-banner glass-panel px-6 py-3 rounded-2xl border border-indigo-500/50 flex items-center gap-3 shadow-2xl bg-indigo-950/90';
+            banner.innerHTML = `
+                <i class="fa-solid fa-trophy text-amber-400 text-2xl"></i>
+                <div class="flex flex-col">
+                    <span class="text-xs text-indigo-300 font-bold uppercase tracking-widest">พิชิตความสูงใหม่!</span>
+                    <span class="text-lg font-black text-white">ทะลุระดับ ${heightVal} เมตร</span>
+                </div>
+            `;
+            container.appendChild(banner);
+            setTimeout(() => banner.remove(), 2600);
+        }
+
+        function checkVersusWinCondition() {
+            if (currentGameMode !== 'versus' || isGameOver) return;
+            if (currentHeight >= CONFIG.VERSUS_TARGET_HEIGHT) triggerVersusVictory('Player 1 (ฝั่งซ้าย)', currentHeight, p2CurrentHeight);
+            else if (p2CurrentHeight >= CONFIG.VERSUS_TARGET_HEIGHT) triggerVersusVictory('Player 2 (ฝั่งขวา)', p2CurrentHeight, currentHeight);
+            else if (lives <= 0) triggerVersusVictory('Player 2 (ผู้เล่นฝั่งขวาชนะ!)', p2CurrentHeight, currentHeight);
+            else if (p2Lives <= 0) triggerVersusVictory('Player 1 (ผู้เล่นฝั่งซ้ายชนะ!)', currentHeight, p2CurrentHeight);
+        }
+
+        function triggerVersusVictory(winnerTitle, winnerH, loserH) {
+            isGameOver = true;
+            document.getElementById('modal-icon').className = 'fa-solid fa-trophy text-amber-400';
+            document.getElementById('modal-icon-bg').className = 'w-16 h-16 rounded-2xl bg-amber-500/20 border border-amber-500/40 text-amber-400 flex items-center justify-center text-3xl mx-auto mb-4 shadow-inner';
+            document.getElementById('modal-title').innerText = `${winnerTitle} ชนะ! 🎉`;
+            document.getElementById('modal-subtitle').innerText = 'พิชิตความสูงตามเป้าหมายในการแข่งขัน 2 คน';
+            document.getElementById('label-stat-1').innerText = 'ความสูง P1';
+            document.getElementById('label-stat-2').innerText = 'ความสูง P2';
+            document.getElementById('final-height').innerText = `${currentHeight.toFixed(1)} m`;
+            document.getElementById('final-best').innerText = `${p2CurrentHeight.toFixed(1)} m`;
+            document.getElementById('game-over-modal').classList.remove('hidden');
+        }
+
+        function triggerGameOver() {
+            isGameOver = true;
+            document.getElementById('label-stat-1').innerText = 'ความสูงที่ทำได้';
+            document.getElementById('label-stat-2').innerText = 'สถิติสูงสุด';
+            document.getElementById('final-height').innerText = `${currentHeight.toFixed(1)} m`;
+            document.getElementById('final-best').innerText = `${bestHeight.toFixed(1)} m`;
+            document.getElementById('game-over-modal').classList.remove('hidden');
+        }
+
+        function restartGame() {
+            placedBodies.forEach(b => Composite.remove(world, b));
+            p2PlacedBodies.forEach(b => Composite.remove(world, b));
+            placedBodies = [];
+            p2PlacedBodies = [];
+            particles = [];
+            lives = CONFIG.MAX_LIVES;
+            p2Lives = CONFIG.MAX_LIVES;
+            currentHeight = 0;
+            p2CurrentHeight = 0;
+            currentRotation = 0;
+            p2Rotation = 0;
+            isGameOver = false;
+
+            recreatePlatforms();
+
+            document.getElementById('height-val').innerText = '0.0';
+            document.getElementById('game-over-modal').classList.add('hidden');
+
+            updateLivesUI();
+            if (currentGameMode === 'versus') updateVersusLivesUI();
+
+            selectedShapeIndex = Math.floor(Math.random() * SHAPES.length);
+            nextShapeIndex = Math.floor(Math.random() * SHAPES.length);
+            p2SelectedShapeIndex = Math.floor(Math.random() * SHAPES.length);
+            p2NextShapeIndex = Math.floor(Math.random() * SHAPES.length);
+            buildShapeSelectorUI();
+        }
+
+        function toggleSound() {
+            soundEnabled = !soundEnabled;
+            const icon = document.getElementById('sound-icon');
+            if (soundEnabled) icon.className = 'fa-solid fa-volume-high';
+            else icon.className = 'fa-solid fa-volume-xmark text-red-400';
+        }
+    </script>
+</body>
+</html>
